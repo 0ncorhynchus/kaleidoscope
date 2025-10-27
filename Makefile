@@ -1,6 +1,6 @@
-EXEC = kaleidoscope
+EXEC = toy
 CXX = clang++
-CFLAGS = -O3 -g
+CXXFLAGS = -O3 -g $(shell llvm-config --cxxflags --ldflags --system-libs --libs core)
 
 .PHONY: all
 all: $(EXEC)
@@ -14,4 +14,4 @@ clean:
 	rm -rf $(EXEC) *.o
 
 $(EXEC): parser.o
-	$(CXX) $(CFLAGS) -o $@ $^
+	$(CXX) $(CXXFLAGS) -o $@ $^
