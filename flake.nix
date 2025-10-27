@@ -17,7 +17,10 @@
         devShells.default =
           with pkgs;
           mkShell {
-            buildInputs = [ llvmPackages_latest.llvm ];
+            buildInputs = [
+              llvmPackages_latest.llvm
+              clang-tools
+            ];
           };
       }
     );
