@@ -10,6 +10,12 @@
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Type.h"
 #include "llvm/IR/Verifier.h"
+#include "llvm/Passes/PassBuilder.h"
+#include "llvm/Passes/StandardInstrumentations.h"
+#include "llvm/Transforms/InstCombine/InstCombine.h"
+#include "llvm/Transforms/Scalar/GVN.h"
+#include "llvm/Transforms/Scalar/Reassociate.h"
+#include "llvm/Transforms/Scalar/SimplifyCFG.h"
 #include <map>
 #include <memory>
 #include <string>
@@ -22,6 +28,14 @@ static std::unique_ptr<LLVMContext> TheContext;
 static std::unique_ptr<IRBuilder<>> Builder;
 static std::unique_ptr<Module> TheModule;
 static std::map<std::string, Value *> NamedValues;
+static std::unique_ptr<FunctionPassManager> TheFPM;
+static std::unique_ptr<LoopAnalysisManager> TheLAM;
+static std::unique_ptr<FunctionAnalysisManager> TheFAM;
+static std::unique_ptr<CGSCCAnalysisManager> TheCGAM;
+static std::unique_ptr<ModuleAnalysisManager> TheMAM;
+static std::unique_ptr<PassInstrumentationCallbacks> ThePIC;
+static std::unique_ptr<StandardInstrumentations> TheSI;
+// static std::unique_ptr<KaleidoscopeJIT> TheJIT;
 
 /// ExprAST - Base class for all expression nodes.
 class ExprAST {
@@ -221,6 +235,9 @@ Function *FunctionAST::codegen() {
 
     // Validate the generated code, checking for consistency.
     verifyFunction(*TheFunction);
+
+    // Optimize the function.
+    TheFPM->run(*TheFunction, *TheFAM);
 
     return TheFunction;
   }
@@ -426,13 +443,41 @@ static std::unique_ptr<FunctionAST> ParseTopLevelExpr() {
 // Top-Level parsing and JIT Driver
 //
 
-static void InitializeModule() {
+void InitializeModuleAndManagers(void) {
   // Open a new context and module.
   TheContext = std::make_unique<LLVMContext>();
-  TheModule = std::make_unique<Module>("my cool jit", *TheContext);
+  TheModule = std::make_unique<Module>("KaleidoscopeJIT", *TheContext);
+  // TheModule->setDataLayout(TheJIT->getDataLayout());
 
   // Create a new builder for the module.
   Builder = std::make_unique<IRBuilder<>>(*TheContext);
+
+  // Create new pass and analysis managers.
+  TheFPM = std::make_unique<FunctionPassManager>();
+  TheLAM = std::make_unique<LoopAnalysisManager>();
+  TheFAM = std::make_unique<FunctionAnalysisManager>();
+  TheCGAM = std::make_unique<CGSCCAnalysisManager>();
+  TheMAM = std::make_unique<ModuleAnalysisManager>();
+  ThePIC = std::make_unique<PassInstrumentationCallbacks>();
+  TheSI = std::make_unique<StandardInstrumentations>(*TheContext,
+                                                     /* DebugLogging */ true);
+  TheSI->registerCallbacks(*ThePIC, TheMAM.get());
+
+  // Add transform passes.
+  // Do simple "peephole" optimizations and bit-twiddling optzns.
+  TheFPM->addPass(InstCombinePass());
+  // Reassociate expressions.
+  TheFPM->addPass(ReassociatePass());
+  // Eliminate Common SubExpressions.
+  TheFPM->addPass(GVNPass());
+  // Simplify the control flow graph (deleting unreachable blocks, etc).
+  TheFPM->addPass(SimplifyCFGPass());
+
+  // Register analysis passes used in these transform passes.
+  PassBuilder PB;
+  PB.registerModuleAnalyses(*TheMAM);
+  PB.registerFunctionAnalyses(*TheFAM);
+  PB.crossRegisterProxies(*TheLAM, *TheFAM, *TheCGAM, *TheMAM);
 }
 
 static void HandleDefinition() {
@@ -502,6 +547,10 @@ static void MainLoop() {
 }
 
 int main() {
+  // InitializeNativeTarget();
+  // InitializeNatibeTargetAsmPrinter();
+  // InitializeNativeTargetAsmParser();
+
   // Install standard binary operators.
   // 1 is lowest precedence.
   BinopPrecedence['<'] = 10;
@@ -513,8 +562,10 @@ int main() {
   fprintf(stderr, "ready> ");
   getNextToken();
 
+  // TheJIT = std::make_unique<KaleidoscopeJIT>();
+
   // Make the module, which holds all the code.
-  InitializeModule();
+  InitializeModuleAndManagers();
 
   // Run the main "interpreter loop" now.
   MainLoop();
