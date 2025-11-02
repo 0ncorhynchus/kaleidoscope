@@ -19,6 +19,7 @@
           mkShell {
             buildInputs = [
               llvmPackages_latest.llvm
+              clang
               clang-tools
             ];
           };
