@@ -13,5 +13,5 @@ format:
 clean:
 	rm -rf $(EXEC) *.o
 
-$(EXEC): parser.o
+$(EXEC): parser.o codegen.o
 	$(CXX) $(CXXFLAGS) -o $@ $^

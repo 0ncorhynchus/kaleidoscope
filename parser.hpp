@@ -1,6 +1,9 @@
 #pragma once
 
+#include "lexer.hpp"
 #include "llvm/IR/Value.h"
+#include <map>
+#include <memory>
 
 /// ExprAST - Base class for all expression nodes.
 class ExprAST {
@@ -78,3 +81,17 @@ public:
       : Proto(std::move(Proto)), Body(std::move(Body)) {}
   llvm::Function *codegen();
 };
+
+/// CurTok/getNextToken - Provide a simple token buffer. CurTok is the current
+/// token the parser is looking at. getNextToken reads another token from the
+/// Lexer and updates CurTok with its results.
+static int CurTok;
+static int getNextToken() { return CurTok = gettok(); }
+
+/// BinopPrecedence - This holds the precedence for each binary operator
+/// that is defined.
+static std::map<char, int> BinopPrecedence;
+
+std::unique_ptr<FunctionAST> ParseDefinition();
+std::unique_ptr<PrototypeAST> ParseExtern();
+std::unique_ptr<FunctionAST> ParseTopLevelExpr();
