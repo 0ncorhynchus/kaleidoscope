@@ -569,11 +569,12 @@ static void HandleTopLevelExpression() {
 static void MainLoop() {
   while (true) {
     fprintf(stderr, "ready> ");
+    getNextToken();
+
     switch (CurTok) {
     case tok_eof:
       return;
     case ';': // ignore top-level semicolons.
-      getNextToken();
       break;
     case tok_def:
       HandleDefinition();
@@ -599,10 +600,6 @@ int main() {
   BinopPrecedence['+'] = 20;
   BinopPrecedence['-'] = 20;
   BinopPrecedence['*'] = 40; // highest
-
-  // Prime the first token.
-  fprintf(stderr, "ready> ");
-  getNextToken();
 
   TheJIT = ExitOnErr(orc::KaleidoscopeJIT::Create());
 
