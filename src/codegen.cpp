@@ -27,164 +27,43 @@
 
 using namespace llvm;
 
-// Static variables for codegen.
-static std::unique_ptr<LLVMContext> TheContext;
-static std::unique_ptr<IRBuilder<>> Builder;
-static std::unique_ptr<Module> TheModule;
-static std::map<std::string, Value *> NamedValues;
-static std::unique_ptr<FunctionPassManager> TheFPM;
-static std::unique_ptr<LoopAnalysisManager> TheLAM;
-static std::unique_ptr<FunctionAnalysisManager> TheFAM;
-static std::unique_ptr<CGSCCAnalysisManager> TheCGAM;
-static std::unique_ptr<ModuleAnalysisManager> TheMAM;
-static std::unique_ptr<PassInstrumentationCallbacks> ThePIC;
-static std::unique_ptr<StandardInstrumentations> TheSI;
-static std::unique_ptr<orc::KaleidoscopeJIT> TheJIT;
-static ExitOnError ExitOnErr;
-static std::map<std::string, std::unique_ptr<PrototypeAST>> FunctionProtos;
+class CodeGenerator {
+public:
+  void Initialize();
+  void InitializeModuleAndManagers();
+  void InitializeTheJIT();
+  void PrintModule();
 
-/// LogError* - These are little helper functions for error handling.
-template <typename T> T LogError(const char *Str) {
-  fprintf(stderr, "Error: %s\n", Str);
-  return nullptr;
-}
+  Function *getFunction(std::string Name);
+  Value *codegen(NumberExprAST &ast);
+  Value *codegen(VariableExprAST &ast);
+  Value *codegen(BinaryExprAST &ast);
+  Value *codegen(CallExprAST &ast);
+  Function *codegen(PrototypeAST &ast);
+  Function *codegen(FunctionAST &ast);
 
-Value *LogErrorV(const char *Str) {
-  LogError<Value *>(Str);
-  return nullptr;
-}
+  void HandleDefinition();
+  void HandleExtern();
+  void HandleTopLevelExpression();
 
-Function *getFunction(std::string Name) {
-  // First, see if the function has already been added to the current module.
-  if (auto *F = TheModule->getFunction(Name))
-    return F;
+private:
+  std::unique_ptr<LLVMContext> TheContext;
+  std::unique_ptr<IRBuilder<>> Builder;
+  std::unique_ptr<Module> TheModule;
+  std::map<std::string, Value *> NamedValues;
+  std::unique_ptr<FunctionPassManager> TheFPM;
+  std::unique_ptr<LoopAnalysisManager> TheLAM;
+  std::unique_ptr<FunctionAnalysisManager> TheFAM;
+  std::unique_ptr<CGSCCAnalysisManager> TheCGAM;
+  std::unique_ptr<ModuleAnalysisManager> TheMAM;
+  std::unique_ptr<PassInstrumentationCallbacks> ThePIC;
+  std::unique_ptr<StandardInstrumentations> TheSI;
+  std::unique_ptr<orc::KaleidoscopeJIT> TheJIT;
+  ExitOnError ExitOnErr;
+  std::map<std::string, std::unique_ptr<PrototypeAST>> FunctionProtos;
+};
 
-  // If not, check whether we can codegen the declaration from some existing
-  // prototype.
-  auto FI = FunctionProtos.find(Name);
-  if (FI != FunctionProtos.end())
-    return FI->second->codegen();
-
-  // If no existing prototype exists, return null.
-  return nullptr;
-}
-
-Value *NumberExprAST::codegen() {
-  return ConstantFP::get(*TheContext, APFloat(Val));
-}
-
-Value *VariableExprAST::codegen() {
-  // Look this variable up in the function.
-  Value *V = NamedValues[Name];
-  if (!V)
-    LogErrorV("Unknown variable name");
-  return V;
-}
-
-Value *BinaryExprAST::codegen() {
-  Value *L = LHS->codegen();
-  Value *R = RHS->codegen();
-  if (!L || !R)
-    return nullptr;
-
-  switch (Op) {
-  case '+':
-    return Builder->CreateFAdd(L, R, "addtmp");
-  case '-':
-    return Builder->CreateFSub(L, R, "subtmp");
-  case '*':
-    return Builder->CreateFMul(L, R, "multmp");
-  case '<':
-    L = Builder->CreateFCmpULT(L, R, "multmp");
-    // Convert bool 0/1 to double 0.0 or 1.0
-    return Builder->CreateUIToFP(L, Type::getDoubleTy(*TheContext), "booltmp");
-
-  default:
-    return LogErrorV("invalid binary operator");
-  }
-}
-
-Value *CallExprAST::codegen() {
-  // Look up the name in the global module table.
-  Function *CalleeF = getFunction(Callee);
-  if (!CalleeF)
-    return LogErrorV("Unknown function referenced");
-
-  // If argument mismatch error.
-  if (CalleeF->arg_size() != Args.size())
-    return LogErrorV("Incorrect # arguments passed");
-
-  std::vector<Value *> ArgsV;
-  for (unsigned i = 0, e = Args.size(); i != e; ++i) {
-    ArgsV.push_back(Args[i]->codegen());
-    if (!ArgsV.back())
-      return nullptr;
-  }
-
-  return Builder->CreateCall(CalleeF, ArgsV, "calltmp");
-}
-
-Function *PrototypeAST::codegen() {
-  // Make the function type: double(double, double) etc.
-  std::vector<Type *> Doubles(Args.size(), Type::getDoubleTy(*TheContext));
-  FunctionType *FT =
-      FunctionType::get(Type::getDoubleTy(*TheContext), Doubles, false);
-  Function *F =
-      Function::Create(FT, Function::ExternalLinkage, Name, TheModule.get());
-
-  // Set names for all arguments.
-  unsigned Idx = 0;
-  for (auto &Arg : F->args())
-    Arg.setName(Args[Idx++]);
-
-  return F;
-}
-
-Function *FunctionAST::codegen() {
-  // Transfer ownership of the prototype to the FunctionProtos map, but keep a
-  // reference to it for use below.
-  auto &P = *Proto;
-  FunctionProtos[Proto->getName()] = std::move(Proto);
-  Function *TheFunction = getFunction(P.getName());
-  if (!TheFunction)
-    return nullptr;
-
-  if (!TheFunction->empty())
-    return (Function *)LogErrorV("Function cannot be redefined.");
-
-  // Create a new basic block to start insertion into.
-  BasicBlock *BB = BasicBlock::Create(*TheContext, "entry", TheFunction);
-  Builder->SetInsertPoint(BB);
-
-  // Record the function arguments in the NamedValues map.
-  NamedValues.clear();
-  unsigned Idx = 0;
-  for (auto &Arg : TheFunction->args())
-    NamedValues[P.getArgs()[Idx++]] = &Arg;
-
-  if (Value *RetVal = Body->codegen()) {
-    // Finish off the function.
-    Builder->CreateRet(RetVal);
-
-    // Validate the generated code, checking for consistency.
-    verifyFunction(*TheFunction);
-
-    // Optimize the function.
-    TheFPM->run(*TheFunction, *TheFAM);
-
-    return TheFunction;
-  }
-
-  // Error reading body, remove function.
-  TheFunction->eraseFromParent();
-  return nullptr;
-}
-
-//
-// Top-Level parsing and JIT Driver
-//
-
-void InitializeModuleAndManagers(void) {
+void CodeGenerator::InitializeModuleAndManagers() {
   // Open a new context and module.
   TheContext = std::make_unique<LLVMContext>();
   TheModule = std::make_unique<Module>("KaleidoscopeJIT", *TheContext);
@@ -221,7 +100,171 @@ void InitializeModuleAndManagers(void) {
   PB.crossRegisterProxies(*TheLAM, *TheFAM, *TheCGAM, *TheMAM);
 }
 
-static void HandleDefinition() {
+void CodeGenerator::InitializeTheJIT() {
+  TheJIT = ExitOnErr(orc::KaleidoscopeJIT::Create());
+}
+
+void CodeGenerator::PrintModule() {
+  // Print out all of the generated code.
+  TheModule->print(errs(), nullptr);
+}
+
+// Static variables for codegen.
+static CodeGenerator TheGenerator;
+
+/// LogError* - These are little helper functions for error handling.
+template <typename T> T LogError(const char *Str) {
+  fprintf(stderr, "Error: %s\n", Str);
+  return nullptr;
+}
+
+Value *LogErrorV(const char *Str) {
+  LogError<Value *>(Str);
+  return nullptr;
+}
+
+Function *CodeGenerator::getFunction(std::string Name) {
+  // First, see if the function has already been added to the current module.
+  if (auto *F = TheModule->getFunction(Name))
+    return F;
+
+  // If not, check whether we can codegen the declaration from some existing
+  // prototype.
+  auto FI = FunctionProtos.find(Name);
+  if (FI != FunctionProtos.end())
+    return FI->second->codegen();
+
+  // If no existing prototype exists, return null.
+  return nullptr;
+}
+
+Value *CodeGenerator::codegen(NumberExprAST &ast) {
+  return ConstantFP::get(*TheContext, APFloat(ast.getValue()));
+}
+
+Value *CodeGenerator::codegen(VariableExprAST &ast) {
+  // Look this variable up in the function.
+  Value *V = NamedValues[ast.getName()];
+  if (!V)
+    LogErrorV("Unknown variable name");
+  return V;
+}
+
+Value *CodeGenerator::codegen(BinaryExprAST &ast) {
+  Value *L = ast.getLHS()->codegen();
+  Value *R = ast.getRHS()->codegen();
+  if (!L || !R)
+    return nullptr;
+
+  switch (ast.getOp()) {
+  case '+':
+    return Builder->CreateFAdd(L, R, "addtmp");
+  case '-':
+    return Builder->CreateFSub(L, R, "subtmp");
+  case '*':
+    return Builder->CreateFMul(L, R, "multmp");
+  case '<':
+    L = Builder->CreateFCmpULT(L, R, "multmp");
+    // Convert bool 0/1 to double 0.0 or 1.0
+    return Builder->CreateUIToFP(L, Type::getDoubleTy(*TheContext), "booltmp");
+
+  default:
+    return LogErrorV("invalid binary operator");
+  }
+}
+
+Value *CodeGenerator::codegen(CallExprAST &ast) {
+  // Look up the name in the global module table.
+  Function *CalleeF = getFunction(ast.getCallee());
+  if (!CalleeF)
+    return LogErrorV("Unknown function referenced");
+
+  auto &Args = ast.getArgs();
+
+  // If argument mismatch error.
+  if (CalleeF->arg_size() != Args.size())
+    return LogErrorV("Incorrect # arguments passed");
+
+  std::vector<Value *> ArgsV;
+  for (unsigned i = 0, e = Args.size(); i != e; ++i) {
+    ArgsV.push_back(Args[i]->codegen());
+    if (!ArgsV.back())
+      return nullptr;
+  }
+
+  return Builder->CreateCall(CalleeF, ArgsV, "calltmp");
+}
+
+Function *CodeGenerator::codegen(PrototypeAST &ast) {
+  auto &Args = ast.getArgs();
+  // Make the function type: double(double, double) etc.
+  std::vector<Type *> Doubles(Args.size(), Type::getDoubleTy(*TheContext));
+  FunctionType *FT =
+      FunctionType::get(Type::getDoubleTy(*TheContext), Doubles, false);
+  Function *F = Function::Create(FT, Function::ExternalLinkage, ast.getName(),
+                                 TheModule.get());
+
+  // Set names for all arguments.
+  unsigned Idx = 0;
+  for (auto &Arg : F->args())
+    Arg.setName(Args[Idx++]);
+
+  return F;
+}
+
+Function *CodeGenerator::codegen(FunctionAST &ast) {
+  // Transfer ownership of the prototype to the FunctionProtos map, but keep a
+  // reference to it for use below.
+  auto &Proto = ast.getProto();
+  auto &P = *Proto;
+  FunctionProtos[Proto->getName()] = std::move(Proto);
+  Function *TheFunction = getFunction(P.getName());
+  if (!TheFunction)
+    return nullptr;
+
+  if (!TheFunction->empty())
+    return (Function *)LogErrorV("Function cannot be redefined.");
+
+  // Create a new basic block to start insertion into.
+  BasicBlock *BB = BasicBlock::Create(*TheContext, "entry", TheFunction);
+  Builder->SetInsertPoint(BB);
+
+  // Record the function arguments in the NamedValues map.
+  NamedValues.clear();
+  unsigned Idx = 0;
+  for (auto &Arg : TheFunction->args())
+    NamedValues[P.getArgs()[Idx++]] = &Arg;
+
+  if (Value *RetVal = ast.getBody()->codegen()) {
+    // Finish off the function.
+    Builder->CreateRet(RetVal);
+
+    // Validate the generated code, checking for consistency.
+    verifyFunction(*TheFunction);
+
+    // Optimize the function.
+    TheFPM->run(*TheFunction, *TheFAM);
+
+    return TheFunction;
+  }
+
+  // Error reading body, remove function.
+  TheFunction->eraseFromParent();
+  return nullptr;
+}
+
+Value *NumberExprAST::codegen() { return TheGenerator.codegen(*this); }
+Value *VariableExprAST::codegen() { return TheGenerator.codegen(*this); }
+Value *BinaryExprAST::codegen() { return TheGenerator.codegen(*this); }
+Value *CallExprAST::codegen() { return TheGenerator.codegen(*this); }
+Function *PrototypeAST::codegen() { return TheGenerator.codegen(*this); }
+Function *FunctionAST::codegen() { return TheGenerator.codegen(*this); }
+
+//
+// Top-Level parsing and JIT Driver
+//
+
+void CodeGenerator::HandleDefinition() {
   if (auto FnAST = ParseDefinition()) {
     if (auto *FnIR = FnAST->codegen()) {
       fprintf(stderr, "Read function definition:");
@@ -237,7 +280,7 @@ static void HandleDefinition() {
   }
 }
 
-static void HandleExtern() {
+void CodeGenerator::HandleExtern() {
   if (auto ProtoAST = ParseExtern()) {
     if (auto *FnIR = ProtoAST->codegen()) {
       fprintf(stderr, "Read extern: ");
@@ -251,7 +294,7 @@ static void HandleExtern() {
   }
 }
 
-static void HandleTopLevelExpression() {
+void CodeGenerator::HandleTopLevelExpression() {
   // Evaluate a top-level expresion into an anonymous function.
   if (auto FnAST = ParseTopLevelExpr()) {
     if (FnAST->codegen()) {
@@ -291,13 +334,13 @@ static void MainLoop() {
     case ';': // ignore top-level semicolons.
       break;
     case tok_def:
-      HandleDefinition();
+      TheGenerator.HandleDefinition();
       break;
     case tok_extern:
-      HandleExtern();
+      TheGenerator.HandleExtern();
       break;
     default:
-      HandleTopLevelExpression();
+      TheGenerator.HandleTopLevelExpression();
       break;
     }
   }
@@ -310,16 +353,15 @@ int main() {
 
   InitializeBinopPrecedence();
 
-  TheJIT = ExitOnErr(orc::KaleidoscopeJIT::Create());
+  TheGenerator.InitializeTheJIT();
 
   // Make the module, which holds all the code.
-  InitializeModuleAndManagers();
+  TheGenerator.InitializeModuleAndManagers();
 
   // Run the main "interpreter loop" now.
   MainLoop();
 
-  // Print out all of the generated code.
-  TheModule->print(errs(), nullptr);
+  TheGenerator.PrintModule();
 
   return 0;
 }

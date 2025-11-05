@@ -16,7 +16,7 @@ all: $(EXEC)
 
 .PHONY: format
 format:
-	clang-format -i *.cpp *.hpp
+	clang-format -i $(SOURCE_DIR)/*.cpp $(INCLUDE_DIR)/*.hpp
 
 .PHNOY: clean
 clean:

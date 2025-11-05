@@ -18,6 +18,7 @@ class NumberExprAST : public ExprAST {
 public:
   NumberExprAST(double Val) : Val(Val) {}
   llvm::Value *codegen() override;
+  double getValue() const { return Val; }
 };
 
 /// VariableExprAST - Expression class for referencing a variable, like "a".
@@ -27,6 +28,7 @@ class VariableExprAST : public ExprAST {
 public:
   VariableExprAST(const std::string &Name) : Name(Name) {}
   llvm::Value *codegen() override;
+  const std::string &getName() const { return Name; }
 };
 
 /// BinaryExprAST - Expression class for a binary operator.
@@ -39,6 +41,9 @@ public:
                 std::unique_ptr<ExprAST> RHS)
       : Op(Op), LHS(std::move(LHS)), RHS(std::move(RHS)) {}
   llvm::Value *codegen() override;
+  char getOp() const { return Op; }
+  std::unique_ptr<ExprAST> &getLHS() { return LHS; }
+  std::unique_ptr<ExprAST> &getRHS() { return RHS; }
 };
 
 /// CallExprAST - Expression class for function calls.
@@ -51,6 +56,8 @@ public:
               std::vector<std::unique_ptr<ExprAST>> Args)
       : Callee(Callee), Args(std::move(Args)) {}
   llvm::Value *codegen() override;
+  const std::string &getCallee() const { return Callee; }
+  std::vector<std::unique_ptr<ExprAST>> &getArgs() { return Args; }
 };
 
 /// PrototypeAST - This class represents teh "prototype" for a function,
@@ -79,6 +86,9 @@ public:
               std::unique_ptr<ExprAST> Body)
       : Proto(std::move(Proto)), Body(std::move(Body)) {}
   llvm::Function *codegen();
+
+  std::unique_ptr<PrototypeAST> &getProto() { return Proto; }
+  std::unique_ptr<ExprAST> &getBody() { return Body; }
 };
 
 /// getCurrentToken returns the current token the parser is looking at.
