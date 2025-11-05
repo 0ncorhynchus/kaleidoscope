@@ -7,7 +7,11 @@
   };
 
   outputs =
-    { self, nixpkgs, flake-utils }:
+    {
+      self,
+      nixpkgs,
+      flake-utils,
+    }:
     flake-utils.lib.eachDefaultSystem (
       system:
       let
@@ -16,11 +20,12 @@
       {
         devShells.default =
           with pkgs;
-          mkShell {
+          mkShellNoCC {
             buildInputs = [
-              llvmPackages_latest.llvm
-              clang
-              clang-tools
+              llvmPackages.llvm
+              llvmPackages.clang
+              llvmPackages.clang-tools # for clang-format
+              llvmPackages.lldb
             ];
           };
       }
