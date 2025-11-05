@@ -1,6 +1,5 @@
 #pragma once
 
-#include "lexer.hpp"
 #include "llvm/IR/Value.h"
 #include <map>
 #include <memory>
@@ -82,15 +81,14 @@ public:
   llvm::Function *codegen();
 };
 
-/// CurTok/getNextToken - Provide a simple token buffer. CurTok is the current
-/// token the parser is looking at. getNextToken reads another token from the
-/// Lexer and updates CurTok with its results.
-static int CurTok;
-static int getNextToken() { return CurTok = gettok(); }
+/// getCurrentToken returns the current token the parser is looking at.
+int getCurrentToken();
 
-/// BinopPrecedence - This holds the precedence for each binary operator
-/// that is defined.
-static std::map<char, int> BinopPrecedence;
+/// getNextToken reads another token from the Lexer
+/// and updates the current token with its results.
+int getNextToken();
+
+void InitializeBinopPrecedence();
 
 std::unique_ptr<FunctionAST> ParseDefinition();
 std::unique_ptr<PrototypeAST> ParseExtern();

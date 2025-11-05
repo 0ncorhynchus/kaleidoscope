@@ -1,4 +1,5 @@
 #include "parser.hpp"
+#include "lexer.hpp"
 #include <memory>
 #include <string>
 #include <vector>
@@ -15,6 +16,10 @@ std::unique_ptr<PrototypeAST> LogErrorP(const char *Str) {
   LogError(Str);
   return nullptr;
 }
+
+static int CurTok;
+int getCurrentToken() { return CurTok; }
+int getNextToken() { return CurTok = gettok(); }
 
 /// numberexpr ::= number
 static std::unique_ptr<ExprAST> ParseNumberExpr() {
@@ -87,6 +92,19 @@ static std::unique_ptr<ExprAST> ParsePrimary() {
   case '(':
     return ParseParenExpr();
   }
+}
+
+/// BinopPrecedence - This holds the precedence for each binary operator
+/// that is defined.
+static std::map<char, int> BinopPrecedence;
+
+void InitializeBinopPrecedence() {
+  // Install standard binary operators.
+  // 1 is lowest precedence.
+  BinopPrecedence['<'] = 10;
+  BinopPrecedence['+'] = 20;
+  BinopPrecedence['-'] = 20;
+  BinopPrecedence['*'] = 40; // highest
 }
 
 /// GetTokPrecedence - Get the precedence of the pending binary operator token.

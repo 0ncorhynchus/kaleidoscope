@@ -285,9 +285,7 @@ static void HandleTopLevelExpression() {
 static void MainLoop() {
   while (true) {
     fprintf(stderr, "ready> ");
-    getNextToken();
-
-    switch (CurTok) {
+    switch (getNextToken()) {
     case tok_eof:
       return;
     case ';': // ignore top-level semicolons.
@@ -310,12 +308,7 @@ int main() {
   InitializeNativeTargetAsmPrinter();
   InitializeNativeTargetAsmParser();
 
-  // Install standard binary operators.
-  // 1 is lowest precedence.
-  BinopPrecedence['<'] = 10;
-  BinopPrecedence['+'] = 20;
-  BinopPrecedence['-'] = 20;
-  BinopPrecedence['*'] = 40; // highest
+  InitializeBinopPrecedence();
 
   TheJIT = ExitOnErr(orc::KaleidoscopeJIT::Create());
 
