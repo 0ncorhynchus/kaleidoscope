@@ -1,10 +1,11 @@
 #include "parser.hpp"
 #include "lexer.hpp"
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
 
-using namespace llvm;
+// using namespace llvm;
 
 /// LogError* - These are little helper functions for error handling.
 std::unique_ptr<ExprAST> LogError(const char *Str) {

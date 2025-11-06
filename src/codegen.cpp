@@ -1,21 +1,16 @@
-#include "KaleidoscopeJIT.h"
+#include "codegen.hpp"
 #include "lexer.hpp"
-#include "parser.hpp"
 #include "llvm/ADT/APFloat.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ExecutionEngine/Orc/ThreadSafeModule.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DerivedTypes.h"
-#include "llvm/IR/Function.h"
-#include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Type.h"
 #include "llvm/IR/Verifier.h"
 #include "llvm/Passes/PassBuilder.h"
-#include "llvm/Passes/StandardInstrumentations.h"
-#include "llvm/Support/TargetSelect.h"
 #include "llvm/Transforms/InstCombine/InstCombine.h"
 #include "llvm/Transforms/Scalar/GVN.h"
 #include "llvm/Transforms/Scalar/Reassociate.h"
@@ -26,45 +21,6 @@
 #include <vector>
 
 using namespace llvm;
-
-class CodeGenerator {
-public:
-  void Initialize();
-  void InitializeModuleAndManagers();
-  void InitializeTheJIT();
-  void PrintModule();
-
-  Function *getFunction(std::string Name);
-  Value *operator()(NumberExprAST &ast);
-  Value *operator()(VariableExprAST &ast);
-  Value *operator()(BinaryExprAST &ast);
-  Value *operator()(CallExprAST &ast);
-  Value *codegen(std::unique_ptr<ExprAST> &ast) {
-    return std::visit(*this, ast->node);
-  }
-  Function *codegen(const std::unique_ptr<PrototypeAST> &ast);
-  Function *codegen(std::unique_ptr<FunctionAST> ast);
-
-  void HandleDefinition();
-  void HandleExtern();
-  void HandleTopLevelExpression();
-
-private:
-  std::unique_ptr<LLVMContext> TheContext;
-  std::unique_ptr<IRBuilder<>> Builder;
-  std::unique_ptr<Module> TheModule;
-  std::map<std::string, Value *> NamedValues;
-  std::unique_ptr<FunctionPassManager> TheFPM;
-  std::unique_ptr<LoopAnalysisManager> TheLAM;
-  std::unique_ptr<FunctionAnalysisManager> TheFAM;
-  std::unique_ptr<CGSCCAnalysisManager> TheCGAM;
-  std::unique_ptr<ModuleAnalysisManager> TheMAM;
-  std::unique_ptr<PassInstrumentationCallbacks> ThePIC;
-  std::unique_ptr<StandardInstrumentations> TheSI;
-  std::unique_ptr<orc::KaleidoscopeJIT> TheJIT;
-  ExitOnError ExitOnErr;
-  std::map<std::string, std::unique_ptr<PrototypeAST>> FunctionProtos;
-};
 
 void CodeGenerator::InitializeModuleAndManagers() {
   // Open a new context and module.
@@ -111,9 +67,6 @@ void CodeGenerator::PrintModule() {
   // Print out all of the generated code.
   TheModule->print(errs(), nullptr);
 }
-
-// Static variables for codegen.
-static CodeGenerator TheGenerator;
 
 /// LogError* - These are little helper functions for error handling.
 template <typename T> T LogError(const char *Str) {
@@ -318,46 +271,4 @@ void CodeGenerator::HandleTopLevelExpression() {
     // Skip token for error recovery.
     getNextToken();
   }
-}
-
-/// top ::= definition | external | expression | ';'
-static void MainLoop() {
-  while (true) {
-    fprintf(stderr, "ready> ");
-    switch (getNextToken()) {
-    case tok_eof:
-      return;
-    case ';': // ignore top-level semicolons.
-      break;
-    case tok_def:
-      TheGenerator.HandleDefinition();
-      break;
-    case tok_extern:
-      TheGenerator.HandleExtern();
-      break;
-    default:
-      TheGenerator.HandleTopLevelExpression();
-      break;
-    }
-  }
-}
-
-int main() {
-  InitializeNativeTarget();
-  InitializeNativeTargetAsmPrinter();
-  InitializeNativeTargetAsmParser();
-
-  InitializeBinopPrecedence();
-
-  TheGenerator.InitializeTheJIT();
-
-  // Make the module, which holds all the code.
-  TheGenerator.InitializeModuleAndManagers();
-
-  // Run the main "interpreter loop" now.
-  MainLoop();
-
-  TheGenerator.PrintModule();
-
-  return 0;
 }
