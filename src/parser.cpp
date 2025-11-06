@@ -23,9 +23,9 @@ int getNextToken() { return CurTok = gettok(); }
 
 /// numberexpr ::= number
 static std::unique_ptr<ExprAST> ParseNumberExpr() {
-  auto Result = std::make_unique<NumberExprAST>(NumVal);
+  ExprNode Node = NumberExprAST{NumVal};
   getNextToken(); // consume the number
-  return std::move(Result);
+  return std::make_unique<ExprAST>(std::move(Node));
 }
 
 static std::unique_ptr<ExprAST> ParseExpression();
@@ -46,12 +46,13 @@ static std::unique_ptr<ExprAST> ParseParenExpr() {
 ///   ::= identifier
 ///   ::= identifier '(' expression* ')'
 static std::unique_ptr<ExprAST> ParseIdentifierExpr() {
-  std::string IdName = IdentifierStr;
+  const std::string IdName = IdentifierStr;
+  ExprNode VarNode = VariableExprAST(IdName);
 
   getNextToken(); // eat identifier.
 
   if (CurTok != '(') // Simple variable ref.
-    return std::make_unique<VariableExprAST>(IdName);
+    return std::make_unique<ExprAST>(std::move(VarNode));
 
   // Call.
   getNextToken(); // eat '('
@@ -74,7 +75,8 @@ static std::unique_ptr<ExprAST> ParseIdentifierExpr() {
 
   getNextToken(); // eat ')'.
 
-  return std::make_unique<CallExprAST>(IdName, std::move(Args));
+  ExprNode CallNode = CallExprAST(IdName, std::move(Args));
+  return std::make_unique<ExprAST>(std::move(CallNode));
 }
 
 /// primary
@@ -151,8 +153,8 @@ static std::unique_ptr<ExprAST> ParseBinOpRHS(int ExprPrec,
     }
 
     // Merge LHS/RHS.
-    LHS =
-        std::make_unique<BinaryExprAST>(BinOp, std::move(LHS), std::move(RHS));
+    ExprNode Node = BinaryExprAST(BinOp, std::move(LHS), std::move(RHS));
+    LHS = std::make_unique<ExprAST>(std::move(Node));
 
   } // Loop around to the top of the while loop.
 }

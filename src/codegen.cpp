@@ -35,10 +35,13 @@ public:
   void PrintModule();
 
   Function *getFunction(std::string Name);
-  Value *codegen(NumberExprAST &ast);
-  Value *codegen(VariableExprAST &ast);
-  Value *codegen(BinaryExprAST &ast);
-  Value *codegen(CallExprAST &ast);
+  Value *operator()(NumberExprAST &ast);
+  Value *operator()(VariableExprAST &ast);
+  Value *operator()(BinaryExprAST &ast);
+  Value *operator()(CallExprAST &ast);
+  Value *codegen(std::unique_ptr<ExprAST> &ast) {
+    return std::visit(*this, ast->node);
+  }
   Function *codegen(const std::unique_ptr<PrototypeAST> &ast);
   Function *codegen(std::unique_ptr<FunctionAST> ast);
 
@@ -138,25 +141,25 @@ Function *CodeGenerator::getFunction(std::string Name) {
   return nullptr;
 }
 
-Value *CodeGenerator::codegen(NumberExprAST &ast) {
-  return ConstantFP::get(*TheContext, APFloat(ast.getValue()));
+Value *CodeGenerator::operator()(NumberExprAST &ast) {
+  return ConstantFP::get(*TheContext, APFloat(ast.Val));
 }
 
-Value *CodeGenerator::codegen(VariableExprAST &ast) {
+Value *CodeGenerator::operator()(VariableExprAST &ast) {
   // Look this variable up in the function.
-  Value *V = NamedValues[ast.getName()];
+  Value *V = NamedValues[ast.Name];
   if (!V)
     LogErrorV("Unknown variable name");
   return V;
 }
 
-Value *CodeGenerator::codegen(BinaryExprAST &ast) {
-  Value *L = ast.getLHS()->codegen();
-  Value *R = ast.getRHS()->codegen();
+Value *CodeGenerator::operator()(BinaryExprAST &ast) {
+  Value *L = codegen(ast.LHS);
+  Value *R = codegen(ast.RHS);
   if (!L || !R)
     return nullptr;
 
-  switch (ast.getOp()) {
+  switch (ast.Op) {
   case '+':
     return Builder->CreateFAdd(L, R, "addtmp");
   case '-':
@@ -173,13 +176,13 @@ Value *CodeGenerator::codegen(BinaryExprAST &ast) {
   }
 }
 
-Value *CodeGenerator::codegen(CallExprAST &ast) {
+Value *CodeGenerator::operator()(CallExprAST &ast) {
   // Look up the name in the global module table.
-  Function *CalleeF = getFunction(ast.getCallee());
+  Function *CalleeF = getFunction(ast.Callee);
   if (!CalleeF)
     return LogErrorV("Unknown function referenced");
 
-  auto &Args = ast.getArgs();
+  auto &Args = ast.Args;
 
   // If argument mismatch error.
   if (CalleeF->arg_size() != Args.size())
@@ -187,7 +190,7 @@ Value *CodeGenerator::codegen(CallExprAST &ast) {
 
   std::vector<Value *> ArgsV;
   for (unsigned i = 0, e = Args.size(); i != e; ++i) {
-    ArgsV.push_back(Args[i]->codegen());
+    ArgsV.push_back(codegen(Args[i]));
     if (!ArgsV.back())
       return nullptr;
   }
@@ -235,7 +238,7 @@ Function *CodeGenerator::codegen(std::unique_ptr<FunctionAST> ast) {
   for (auto &Arg : TheFunction->args())
     NamedValues[P.getArgs()[Idx++]] = &Arg;
 
-  if (Value *RetVal = ast->getBody()->codegen()) {
+  if (Value *RetVal = codegen(ast->getBody())) {
     // Finish off the function.
     Builder->CreateRet(RetVal);
 
@@ -252,11 +255,6 @@ Function *CodeGenerator::codegen(std::unique_ptr<FunctionAST> ast) {
   TheFunction->eraseFromParent();
   return nullptr;
 }
-
-Value *NumberExprAST::codegen() { return TheGenerator.codegen(*this); }
-Value *VariableExprAST::codegen() { return TheGenerator.codegen(*this); }
-Value *BinaryExprAST::codegen() { return TheGenerator.codegen(*this); }
-Value *CallExprAST::codegen() { return TheGenerator.codegen(*this); }
 
 //
 // Top-Level parsing and JIT Driver
