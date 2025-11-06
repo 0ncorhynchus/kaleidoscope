@@ -73,7 +73,6 @@ public:
 
   const std::string &getName() const { return Name; }
   const std::vector<std::string> &getArgs() const { return Args; }
-  llvm::Function *codegen();
 };
 
 /// FunctionAST - This class represents a function definition itself.
@@ -85,7 +84,6 @@ public:
   FunctionAST(std::unique_ptr<PrototypeAST> Proto,
               std::unique_ptr<ExprAST> Body)
       : Proto(std::move(Proto)), Body(std::move(Body)) {}
-  llvm::Function *codegen();
 
   std::unique_ptr<PrototypeAST> &getProto() { return Proto; }
   std::unique_ptr<ExprAST> &getBody() { return Body; }

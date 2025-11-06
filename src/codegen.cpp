@@ -39,8 +39,8 @@ public:
   Value *codegen(VariableExprAST &ast);
   Value *codegen(BinaryExprAST &ast);
   Value *codegen(CallExprAST &ast);
-  Function *codegen(PrototypeAST &ast);
-  Function *codegen(FunctionAST &ast);
+  Function *codegen(const std::unique_ptr<PrototypeAST> &ast);
+  Function *codegen(std::unique_ptr<FunctionAST> ast);
 
   void HandleDefinition();
   void HandleExtern();
@@ -132,7 +132,7 @@ Function *CodeGenerator::getFunction(std::string Name) {
   // prototype.
   auto FI = FunctionProtos.find(Name);
   if (FI != FunctionProtos.end())
-    return FI->second->codegen();
+    return codegen(FI->second);
 
   // If no existing prototype exists, return null.
   return nullptr;
@@ -195,13 +195,13 @@ Value *CodeGenerator::codegen(CallExprAST &ast) {
   return Builder->CreateCall(CalleeF, ArgsV, "calltmp");
 }
 
-Function *CodeGenerator::codegen(PrototypeAST &ast) {
-  auto &Args = ast.getArgs();
+Function *CodeGenerator::codegen(const std::unique_ptr<PrototypeAST> &ast) {
+  auto &Args = ast->getArgs();
   // Make the function type: double(double, double) etc.
   std::vector<Type *> Doubles(Args.size(), Type::getDoubleTy(*TheContext));
   FunctionType *FT =
       FunctionType::get(Type::getDoubleTy(*TheContext), Doubles, false);
-  Function *F = Function::Create(FT, Function::ExternalLinkage, ast.getName(),
+  Function *F = Function::Create(FT, Function::ExternalLinkage, ast->getName(),
                                  TheModule.get());
 
   // Set names for all arguments.
@@ -212,10 +212,10 @@ Function *CodeGenerator::codegen(PrototypeAST &ast) {
   return F;
 }
 
-Function *CodeGenerator::codegen(FunctionAST &ast) {
+Function *CodeGenerator::codegen(std::unique_ptr<FunctionAST> ast) {
   // Transfer ownership of the prototype to the FunctionProtos map, but keep a
   // reference to it for use below.
-  auto &Proto = ast.getProto();
+  auto &Proto = ast->getProto();
   auto &P = *Proto;
   FunctionProtos[Proto->getName()] = std::move(Proto);
   Function *TheFunction = getFunction(P.getName());
@@ -235,7 +235,7 @@ Function *CodeGenerator::codegen(FunctionAST &ast) {
   for (auto &Arg : TheFunction->args())
     NamedValues[P.getArgs()[Idx++]] = &Arg;
 
-  if (Value *RetVal = ast.getBody()->codegen()) {
+  if (Value *RetVal = ast->getBody()->codegen()) {
     // Finish off the function.
     Builder->CreateRet(RetVal);
 
@@ -257,8 +257,6 @@ Value *NumberExprAST::codegen() { return TheGenerator.codegen(*this); }
 Value *VariableExprAST::codegen() { return TheGenerator.codegen(*this); }
 Value *BinaryExprAST::codegen() { return TheGenerator.codegen(*this); }
 Value *CallExprAST::codegen() { return TheGenerator.codegen(*this); }
-Function *PrototypeAST::codegen() { return TheGenerator.codegen(*this); }
-Function *FunctionAST::codegen() { return TheGenerator.codegen(*this); }
 
 //
 // Top-Level parsing and JIT Driver
@@ -266,7 +264,7 @@ Function *FunctionAST::codegen() { return TheGenerator.codegen(*this); }
 
 void CodeGenerator::HandleDefinition() {
   if (auto FnAST = ParseDefinition()) {
-    if (auto *FnIR = FnAST->codegen()) {
+    if (auto *FnIR = codegen(std::move(FnAST))) {
       fprintf(stderr, "Read function definition:");
       FnIR->print(errs());
       fprintf(stderr, "\n");
@@ -282,7 +280,7 @@ void CodeGenerator::HandleDefinition() {
 
 void CodeGenerator::HandleExtern() {
   if (auto ProtoAST = ParseExtern()) {
-    if (auto *FnIR = ProtoAST->codegen()) {
+    if (auto *FnIR = codegen(ProtoAST)) {
       fprintf(stderr, "Read extern: ");
       FnIR->print(errs());
       fprintf(stderr, "\n");
@@ -297,7 +295,7 @@ void CodeGenerator::HandleExtern() {
 void CodeGenerator::HandleTopLevelExpression() {
   // Evaluate a top-level expresion into an anonymous function.
   if (auto FnAST = ParseTopLevelExpr()) {
-    if (FnAST->codegen()) {
+    if (codegen(std::move(FnAST))) {
       // Create a ResourceTracker to track JIT'd memory allocated to our
       // anonymous expression -- that way we can free it after executing.
       auto RT = TheJIT->getMainJITDylib().createResourceTracker();
