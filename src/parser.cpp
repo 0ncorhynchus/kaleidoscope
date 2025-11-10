@@ -5,8 +5,6 @@
 #include <string>
 #include <vector>
 
-// using namespace llvm;
-
 /// LogError* - These are little helper functions for error handling.
 std::unique_ptr<ExprAST> LogError(const char *Str) {
   fprintf(stderr, "Error: %s\n", Str);
@@ -80,6 +78,37 @@ static std::unique_ptr<ExprAST> ParseIdentifierExpr() {
   return std::make_unique<ExprAST>(std::move(CallNode));
 }
 
+/// ifexpr ::= 'if' expression 'then' expression 'else' expression
+static std::unique_ptr<ExprAST> ParseIfExpr() {
+  getNextToken(); // eat the if.
+
+  // condition.
+  auto Cond = ParseExpression();
+  if (!Cond)
+    return nullptr;
+
+  if (CurTok != tok_then)
+    return LogError("expected then");
+  getNextToken(); // eat the then
+
+  auto Then = ParseExpression();
+  if (!Then)
+    return nullptr;
+
+  if (CurTok != tok_else)
+    return LogError("expected else");
+
+  getNextToken(); // eat the else
+
+  auto Else = ParseExpression();
+  if (!Else)
+    return nullptr;
+
+  ExprNode IfNode =
+      IfExprAST(std::move(Cond), std::move(Then), std::move(Else));
+  return std::make_unique<ExprAST>(std::move(IfNode));
+}
+
 /// primary
 ///   ::= identifierexpr
 ///   ::= numberexpr
@@ -94,6 +123,8 @@ static std::unique_ptr<ExprAST> ParsePrimary() {
     return ParseNumberExpr();
   case '(':
     return ParseParenExpr();
+  case tok_if:
+    return ParseIfExpr();
   }
 }
 

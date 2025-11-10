@@ -36,8 +36,16 @@ struct CallExprAST {
   std::vector<std::unique_ptr<ExprAST>> Args;
 };
 
-using ExprNode =
-    std::variant<NumberExprAST, VariableExprAST, BinaryExprAST, CallExprAST>;
+/// IfExprAST - Expression class for if/then/else.
+struct IfExprAST {
+  IfExprAST(std::unique_ptr<ExprAST> &&Cond, std::unique_ptr<ExprAST> &&Then,
+            std::unique_ptr<ExprAST> &&Else)
+      : Cond(std::move(Cond)), Then(std::move(Then)), Else(std::move(Else)) {}
+  std::unique_ptr<ExprAST> Cond, Then, Else;
+};
+
+using ExprNode = std::variant<NumberExprAST, VariableExprAST, BinaryExprAST,
+                              CallExprAST, IfExprAST>;
 
 struct ExprAST {
   ExprAST(ExprNode &&node) : node(std::move(node)) {}
