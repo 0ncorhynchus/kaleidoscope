@@ -15,7 +15,6 @@
 #include "llvm/Transforms/Scalar/GVN.h"
 #include "llvm/Transforms/Scalar/Reassociate.h"
 #include "llvm/Transforms/Scalar/SimplifyCFG.h"
-#include <iostream>
 #include <map>
 #include <memory>
 #include <string>
@@ -24,8 +23,8 @@
 using namespace llvm;
 
 extern "C" double putchard(double X) {
-  std::cerr << X << std::endl;
-  return X;
+  fputc((char)X, stderr);
+  return 0.0;
 }
 
 void CodeGenerator::InitializeModuleAndManagers() {
