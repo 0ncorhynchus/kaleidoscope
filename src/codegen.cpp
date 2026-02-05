@@ -15,12 +15,18 @@
 #include "llvm/Transforms/Scalar/GVN.h"
 #include "llvm/Transforms/Scalar/Reassociate.h"
 #include "llvm/Transforms/Scalar/SimplifyCFG.h"
+#include <iostream>
 #include <map>
 #include <memory>
 #include <string>
 #include <vector>
 
 using namespace llvm;
+
+extern "C" double putchard(double X) {
+  std::cerr << X << std::endl;
+  return X;
+}
 
 void CodeGenerator::InitializeModuleAndManagers() {
   // Open a new context and module.
@@ -61,6 +67,10 @@ void CodeGenerator::InitializeModuleAndManagers() {
 
 void CodeGenerator::InitializeTheJIT() {
   TheJIT = ExitOnErr(orc::KaleidoscopeJIT::Create());
+}
+
+void CodeGenerator::InitializeExternal() {
+  cantFail(TheJIT->addExternalFunction("putchard", (void *)&putchard));
 }
 
 void CodeGenerator::PrintModule() {

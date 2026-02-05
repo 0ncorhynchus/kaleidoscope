@@ -15,6 +15,7 @@ public:
   void Initialize();
   void InitializeModuleAndManagers();
   void InitializeTheJIT();
+  void InitializeExternal();
   void PrintModule();
 
   llvm::Function *getFunction(std::string Name);

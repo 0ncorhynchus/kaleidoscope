@@ -37,6 +37,8 @@ int main() {
   // Make the module, which holds all the code.
   generator.InitializeModuleAndManagers();
 
+  generator.InitializeExternal();
+
   // Run the main "interpreter loop" now.
   MainLoop(generator);
 

@@ -15,6 +15,7 @@
 
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ExecutionEngine/JITSymbol.h"
+#include "llvm/ExecutionEngine/Orc/AbsoluteSymbols.h"
 #include "llvm/ExecutionEngine/Orc/CompileUtils.h"
 #include "llvm/ExecutionEngine/Orc/Core.h"
 #include "llvm/ExecutionEngine/Orc/ExecutionUtils.h"
@@ -99,6 +100,14 @@ public:
 
   Expected<ExecutorSymbolDef> lookup(StringRef Name) {
     return ES->lookup({&MainJD}, Mangle(Name.str()));
+  }
+
+  Error addExternalFunction(StringRef Name, void *FnPtr) {
+    SymbolMap Syms;
+    Syms[Mangle(Name)] =
+        ExecutorSymbolDef::fromPtr(FnPtr, JITSymbolFlags::Callable);
+
+    return MainJD.define(absoluteSymbols(std::move(Syms)));
   }
 };
 
