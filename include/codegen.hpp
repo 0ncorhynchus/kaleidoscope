@@ -24,6 +24,7 @@ public:
   llvm::Value *operator()(BinaryExprAST &ast);
   llvm::Value *operator()(CallExprAST &ast);
   llvm::Value *operator()(IfExprAST &ast);
+  llvm::Value *operator()(ForExprAST &ast);
   llvm::Value *codegen(std::unique_ptr<ExprAST> &ast) {
     return std::visit(*this, ast->node);
   }

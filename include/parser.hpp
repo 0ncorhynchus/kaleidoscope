@@ -44,8 +44,19 @@ struct IfExprAST {
   std::unique_ptr<ExprAST> Cond, Then, Else;
 };
 
+/// ForExprAST - Expression class for for/in.
+struct ForExprAST {
+  ForExprAST(const std::string &VarName, std::unique_ptr<ExprAST> Start,
+             std::unique_ptr<ExprAST> End, std::unique_ptr<ExprAST> Step,
+             std::unique_ptr<ExprAST> Body)
+      : VarName(VarName), Start(std::move(Start)), End(std::move(End)),
+        Step(std::move(Step)), Body(std::move(Body)) {}
+  std::string VarName;
+  std::unique_ptr<ExprAST> Start, End, Step, Body;
+};
+
 using ExprNode = std::variant<NumberExprAST, VariableExprAST, BinaryExprAST,
-                              CallExprAST, IfExprAST>;
+                              CallExprAST, IfExprAST, ForExprAST>;
 
 struct ExprAST {
   ExprAST(ExprNode &&node) : node(std::move(node)) {}
