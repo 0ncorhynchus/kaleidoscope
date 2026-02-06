@@ -210,8 +210,27 @@ static int GetTokPrecedence() {
   return TokPrec;
 }
 
+/// unary
+///   ::= primary
+///   ::= '!' unary
+static std::unique_ptr<ExprAST> ParseUnary() {
+  // If the current token is not an operator, it must be a primary expr.
+  if (!isascii(CurTok) || CurTok == '(' | CurTok == ',')
+    return ParsePrimary();
+
+  // If this is a unary operator, read it.
+  int Op = CurTok;
+  getNextToken(); // eat operator
+  if (auto Operand = ParseUnary()) {
+    ExprNode Node = UnaryExprAST(Op, std::move(Operand));
+    return std::make_unique<ExprAST>(std::move(Node));
+  }
+
+  return nullptr;
+}
+
 /// binoprhs
-///   ::= ('+' primary)*
+///   ::= ('+' unary)*
 static std::unique_ptr<ExprAST> ParseBinOpRHS(int ExprPrec,
                                               std::unique_ptr<ExprAST> LHS) {
   // If this is a binop, find its precedence.
@@ -227,8 +246,8 @@ static std::unique_ptr<ExprAST> ParseBinOpRHS(int ExprPrec,
     int BinOp = CurTok;
     getNextToken(); // eat binop
 
-    // Parse the primary expression after the binary operator.
-    auto RHS = ParsePrimary();
+    // Parse the unary expression after the binary operator.
+    auto RHS = ParseUnary();
     if (!RHS)
       return nullptr;
 
@@ -249,9 +268,9 @@ static std::unique_ptr<ExprAST> ParseBinOpRHS(int ExprPrec,
 }
 
 /// expression
-///   ::= primary binoprhs
+///   ::= unary binoprhs
 static std::unique_ptr<ExprAST> ParseExpression() {
-  auto LHS = ParsePrimary();
+  auto LHS = ParseUnary();
   if (!LHS)
     return nullptr;
 
@@ -260,6 +279,7 @@ static std::unique_ptr<ExprAST> ParseExpression() {
 
 /// prototype
 ///   ::= id '(' id* ')'
+///   ::= unary LETTER (id)
 ///   ::= binary LETTER number? (id, id)
 static std::unique_ptr<PrototypeAST> ParsePrototype() {
   std::string FnName;
@@ -274,6 +294,15 @@ static std::unique_ptr<PrototypeAST> ParsePrototype() {
     FnName = IdentifierStr;
     Kind = 0;
     getNextToken();
+    break;
+  case tok_unary:
+    getNextToken(); // eat 'unary'
+    if (!isascii(CurTok))
+      return LogErrorP("Expected unary operator");
+    FnName = "unary";
+    FnName += (char)CurTok;
+    Kind = 1;
+    getNextToken(); // eat LETTER
     break;
   case tok_binary:
     getNextToken(); // eat 'binary'

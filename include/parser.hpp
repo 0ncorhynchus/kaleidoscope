@@ -20,6 +20,14 @@ struct VariableExprAST {
   std::string Name;
 };
 
+/// UnaryExprAST - Expresion class for a unary operator.
+struct UnaryExprAST {
+  UnaryExprAST(char Op, std::unique_ptr<ExprAST> Operand)
+      : Op(Op), Operand(std::move(Operand)) {}
+  char Op;
+  std::unique_ptr<ExprAST> Operand;
+};
+
 /// BinaryExprAST - Expression class for a binary operator.
 struct BinaryExprAST {
   BinaryExprAST(char Op, std::unique_ptr<ExprAST> &&LHS,
@@ -56,8 +64,9 @@ struct ForExprAST {
   std::unique_ptr<ExprAST> Start, End, Step, Body;
 };
 
-using ExprNode = std::variant<NumberExprAST, VariableExprAST, BinaryExprAST,
-                              CallExprAST, IfExprAST, ForExprAST>;
+using ExprNode =
+    std::variant<NumberExprAST, VariableExprAST, UnaryExprAST, BinaryExprAST,
+                 CallExprAST, IfExprAST, ForExprAST>;
 
 struct ExprAST {
   ExprAST(ExprNode &&node) : node(std::move(node)) {}

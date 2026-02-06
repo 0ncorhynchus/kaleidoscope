@@ -116,6 +116,18 @@ Value *CodeGenerator::operator()(VariableExprAST &ast) {
   return V;
 }
 
+Value *CodeGenerator::operator()(UnaryExprAST &ast) {
+  Value *OperandV = codegen(ast.Operand);
+  if (!OperandV)
+    return nullptr;
+
+  Function *F = getFunction(std::string("unary") + ast.Op);
+  if (!F)
+    return LogErrorV("Unknown unary operator");
+
+  return Builder->CreateCall(F, OperandV, "unop");
+}
+
 Value *CodeGenerator::operator()(BinaryExprAST &ast) {
   Value *L = codegen(ast.LHS);
   Value *R = codegen(ast.RHS);

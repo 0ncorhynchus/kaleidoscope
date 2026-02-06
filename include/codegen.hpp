@@ -21,6 +21,7 @@ public:
   llvm::Function *getFunction(std::string Name);
   llvm::Value *operator()(NumberExprAST &ast);
   llvm::Value *operator()(VariableExprAST &ast);
+  llvm::Value *operator()(UnaryExprAST &ast);
   llvm::Value *operator()(BinaryExprAST &ast);
   llvm::Value *operator()(CallExprAST &ast);
   llvm::Value *operator()(IfExprAST &ast);
