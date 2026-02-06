@@ -1,5 +1,6 @@
 #include "codegen.hpp"
 #include "lexer.hpp"
+#include "parser.hpp"
 #include "llvm/ADT/APFloat.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ExecutionEngine/Orc/ThreadSafeModule.h"
@@ -134,8 +135,16 @@ Value *CodeGenerator::operator()(BinaryExprAST &ast) {
     return Builder->CreateUIToFP(L, Type::getDoubleTy(*TheContext), "booltmp");
 
   default:
-    return LogErrorV("invalid binary operator");
+    break;
   }
+
+  // If it wasn't a builtin binary operator, it must be a user defined one.
+  // Emit a call to it.
+  Function *F = getFunction(std::string("binary") + ast.Op);
+  assert(F && "binary operator not found!");
+
+  Value *Ops[2] = {L, R};
+  return Builder->CreateCall(F, Ops, "binop");
 }
 
 Value *CodeGenerator::operator()(CallExprAST &ast) {
@@ -317,6 +326,10 @@ Function *CodeGenerator::codegen(std::unique_ptr<FunctionAST> ast) {
   Function *TheFunction = getFunction(P.getName());
   if (!TheFunction)
     return nullptr;
+
+  // If this is an operator, install it.
+  if (P.isBinaryOp())
+    SetBinopPrecedence(P.getOperatorName(), P.getBinaryPrecedence());
 
   if (!TheFunction->empty())
     return (Function *)LogErrorV("Function cannot be redefined.");
