@@ -40,7 +40,7 @@ private:
   std::unique_ptr<llvm::LLVMContext> TheContext;
   std::unique_ptr<llvm::IRBuilder<>> Builder;
   std::unique_ptr<llvm::Module> TheModule;
-  std::map<std::string, llvm::Value *> NamedValues;
+  std::map<std::string, llvm::AllocaInst *> NamedValues;
   std::unique_ptr<llvm::FunctionPassManager> TheFPM;
   std::unique_ptr<llvm::LoopAnalysisManager> TheLAM;
   std::unique_ptr<llvm::FunctionAnalysisManager> TheFAM;
@@ -51,4 +51,7 @@ private:
   std::unique_ptr<llvm::orc::KaleidoscopeJIT> TheJIT;
   llvm::ExitOnError ExitOnErr;
   std::map<std::string, std::unique_ptr<PrototypeAST>> FunctionProtos;
+
+  llvm::AllocaInst *CreateEntryBlockAlloca(llvm::Function *TheFunction,
+                                           llvm::StringRef VarName);
 };

@@ -16,6 +16,7 @@
 #include "llvm/Transforms/Scalar/GVN.h"
 #include "llvm/Transforms/Scalar/Reassociate.h"
 #include "llvm/Transforms/Scalar/SimplifyCFG.h"
+#include "llvm/Transforms/Utils/Mem2Reg.h"
 #include <map>
 #include <memory>
 #include <string>
@@ -49,6 +50,8 @@ void CodeGenerator::InitializeModuleAndManagers() {
   TheSI->registerCallbacks(*ThePIC, TheMAM.get());
 
   // Add transform passes.
+  // Promote allocas to registers.
+  TheFPM->addPass(PromotePass());
   // Do simple "peephole" optimizations and bit-twiddling optzns.
   TheFPM->addPass(InstCombinePass());
   // Reassociate expressions.
@@ -110,10 +113,11 @@ Value *CodeGenerator::operator()(NumberExprAST &ast) {
 
 Value *CodeGenerator::operator()(VariableExprAST &ast) {
   // Look this variable up in the function.
-  Value *V = NamedValues[ast.Name];
-  if (!V)
+  AllocaInst *A = NamedValues[ast.Name];
+  if (!A)
     LogErrorV("Unknown variable name");
-  return V;
+  // Load the value.
+  return Builder->CreateLoad(A->getAllocatedType(), A, ast.Name.c_str());
 }
 
 Value *CodeGenerator::operator()(UnaryExprAST &ast) {
@@ -142,7 +146,7 @@ Value *CodeGenerator::operator()(BinaryExprAST &ast) {
   case '*':
     return Builder->CreateFMul(L, R, "multmp");
   case '<':
-    L = Builder->CreateFCmpULT(L, R, "multmp");
+    L = Builder->CreateFCmpULT(L, R, "cmptmp");
     // Convert bool 0/1 to double 0.0 or 1.0
     return Builder->CreateUIToFP(L, Type::getDoubleTy(*TheContext), "booltmp");
 
@@ -233,16 +237,41 @@ Value *CodeGenerator::operator()(IfExprAST &ast) {
   return PN;
 }
 
+// Output for-loop as:
+//   var = alloca double
+//   ...
+//   start = startexpr
+//   store start -> var
+//   goto loop
+// loop:
+//   ...
+//   bodyexpr
+//   ...
+// loopend:
+//   step = stepexpr
+//   endcond = endexpr
+//
+//   curvar = load var
+//   nextvar = curvar + step
+//   store nextvar -> var
+//   br endcond, loop, outloop
+// outloop:
 Value *CodeGenerator::operator()(ForExprAST &ast) {
+  Function *TheFunction = Builder->GetInsertBlock()->getParent();
+
+  // Create an alloca for the variable in the entry block.
+  AllocaInst *Alloca = CreateEntryBlockAlloca(TheFunction, ast.VarName);
+
   // Emit the start code first, without 'variable' in scope.
   Value *StartVal = codegen(ast.Start);
   if (!StartVal)
     return nullptr;
 
+  // Store the value into the alloca.
+  Builder->CreateStore(StartVal, Alloca);
+
   // Make the new basic block for the loop header, inserting after current
   // block.
-  Function *TheFunction = Builder->GetInsertBlock()->getParent();
-  BasicBlock *PreheaderBB = Builder->GetInsertBlock();
   BasicBlock *LoopBB = BasicBlock::Create(*TheContext, "loop", TheFunction);
 
   // Insert an explicit fall through from the current block to the LoopBB.
@@ -251,16 +280,10 @@ Value *CodeGenerator::operator()(ForExprAST &ast) {
   // Start insertion in LoopBB.
   Builder->SetInsertPoint(LoopBB);
 
-  // Start the PHI node with an entry for Start.
-  PHINode *Variable =
-      Builder->CreatePHI(Type::getDoubleTy(*TheContext), 2, ast.VarName);
-  Variable->addIncoming(StartVal, PreheaderBB);
-
-  // Within the loop, the variable is defined equal to the PHI node.
-  // If it shadows an existing variable, we have to restore it,
-  // so save it now.
-  Value *OldVal = NamedValues[ast.VarName];
-  NamedValues[ast.VarName] = Variable;
+  // Within the loop, the variable is defined equal to the PHI node. If it
+  // shadows an existing variable, we have to restore it, so save it now.
+  AllocaInst *OldVal = NamedValues[ast.VarName];
+  NamedValues[ast.VarName] = Alloca;
 
   // Emit the body of the loop. This, like any other expr, can change the
   // current BB. Note that we ignore the value computed by the body,
@@ -268,6 +291,7 @@ Value *CodeGenerator::operator()(ForExprAST &ast) {
   if (!codegen(ast.Body))
     return nullptr;
 
+  // Emit the step value.
   Value *StepVal = nullptr;
   if (ast.Step) {
     StepVal = codegen(ast.Step);
@@ -277,12 +301,18 @@ Value *CodeGenerator::operator()(ForExprAST &ast) {
     // If not specified, use 1.0.
     StepVal = ConstantFP::get(*TheContext, APFloat(1.0));
   }
-  Value *NextVar = Builder->CreateFAdd(Variable, StepVal, "nextvar");
 
   // Compute the end condition.
   Value *EndCond = codegen(ast.End);
   if (!EndCond)
     return nullptr;
+
+  // Reload, increment, and restore the alloca.  This handles the case where the
+  // body of the loop mutates the variable.
+  Value *CurVar = Builder->CreateLoad(Alloca->getAllocatedType(), Alloca,
+                                      ast.VarName.c_str());
+  Value *NextVar = Builder->CreateFAdd(CurVar, StepVal, "nextvar");
+  Builder->CreateStore(NextVar, Alloca);
 
   // Convert condition to a bool by comparing non-equal to 0.0.
   EndCond = Builder->CreateFCmpONE(
@@ -298,9 +328,6 @@ Value *CodeGenerator::operator()(ForExprAST &ast) {
 
   // Any new code will bi inserted in AfterBB.
   Builder->SetInsertPoint(AfterBB);
-
-  // Add a new entry to the PHI node for the backedge.
-  Variable->addIncoming(NextVar, LoopEndBB);
 
   // Restore the unshadowed variable.
   if (OldVal)
@@ -352,9 +379,16 @@ Function *CodeGenerator::codegen(std::unique_ptr<FunctionAST> ast) {
 
   // Record the function arguments in the NamedValues map.
   NamedValues.clear();
-  unsigned Idx = 0;
-  for (auto &Arg : TheFunction->args())
-    NamedValues[P.getArgs()[Idx++]] = &Arg;
+  for (auto &Arg : TheFunction->args()) {
+    // Create an alloca for this variable.
+    AllocaInst *Alloca = CreateEntryBlockAlloca(TheFunction, Arg.getName());
+
+    // Store the initial value into the alloca.
+    Builder->CreateStore(&Arg, Alloca);
+
+    // Add arguments to variable symbol table.
+    NamedValues[std::string(Arg.getName())] = Alloca;
+  }
 
   if (Value *RetVal = codegen(ast->getBody())) {
     // Finish off the function.
@@ -436,4 +470,13 @@ void CodeGenerator::HandleTopLevelExpression() {
     // Skip token for error recovery.
     getNextToken();
   }
+}
+
+/// CreateEntryBlockAlloca - Create an alloca instruction in the entry block of
+/// the function. This is used for mutable variables etc.
+AllocaInst *CodeGenerator::CreateEntryBlockAlloca(Function *TheFunction,
+                                                  StringRef VarName) {
+  IRBuilder<> TmpB(&TheFunction->getEntryBlock(),
+                   TheFunction->getEntryBlock().begin());
+  return TmpB.CreateAlloca(Type::getDoubleTy(*TheContext), nullptr, VarName);
 }
